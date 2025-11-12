@@ -49,66 +49,49 @@ def is_image_url(url):
         return False
     return any(ext in url.lower() for ext in ['webp','jpg','jpeg','png','gif','bmp','svg'])
 
-def download_and_convert_image(image_url, save_folder, convert_folder, retries=3):
-    """下载图片并处理 webp，支持 Lianjia CDN 防盗链，带重试机制"""
-    for attempt in range(1, retries+1):
-        try:
-            # 判断图片格式
+def download_and_convert_image(image_url, save_folder, convert_folder):
+    try:
+        image_format = 'jpg'
+        is_webp = 'webp' in image_url.lower()
+        if is_webp:
+            image_format = 'webp'
+        elif 'png' in image_url.lower():
+            image_format = 'png'
+        elif any(ext in image_url.lower() for ext in ['jpg','jpeg']):
             image_format = 'jpg'
-            is_webp = 'webp' in image_url.lower()
+
+        original_name = image_url.split("/")[-1]
+        if not os.path.splitext(original_name)[1]:
+            original_name += f".{image_format}"
+        safe_name = re.sub(r'[^\w\.]', '_', original_name)
+        local_img_path = os.path.join(save_folder, safe_name)
+
+        if os.path.exists(local_img_path):
             if is_webp:
-                image_format = 'webp'
-            elif 'png' in image_url.lower():
-                image_format = 'png'
-            elif any(ext in image_url.lower() for ext in ['jpg','jpeg']):
-                image_format = 'jpg'
-
-            # 安全文件名
-            original_name = image_url.split("/")[-1]
-            if not os.path.splitext(original_name)[1]:
-                original_name += f".{image_format}"
-            safe_name = re.sub(r'[^\w\.]', '_', original_name)
-            local_img_path = os.path.join(save_folder, safe_name)
-
-            # 已下载则直接返回
-            if os.path.exists(local_img_path):
-                if is_webp:
-                    png_path = os.path.join(convert_folder, os.path.splitext(safe_name)[0]+'.png')
-                    if os.path.exists(png_path):
-                        return png_path
-                else:
-                    return local_img_path
-
-            # 设置 headers
-            headers = {"User-Agent": "Mozilla/5.0"}
-            # Lianjia CDN 防盗链
-            if "ljcdn.com" in image_url:
-                headers["Referer"] = "https://www.lianjia.com/"
-
-            # 请求图片
-            response = requests.get(image_url, headers=headers, timeout=20)
-            response.raise_for_status()
-            with open(local_img_path,'wb') as f:
-                f.write(response.content)
-
-            # webp 转 png
-            if is_webp:
-                png_path = convert_webp_to_png(local_img_path)
-                if png_path:
-                    new_png_path = os.path.join(convert_folder, os.path.basename(png_path))
-                    os.rename(png_path, new_png_path)
-                    return new_png_path
-                else:
-                    return local_img_path
+                png_path = os.path.join(convert_folder, os.path.splitext(safe_name)[0]+'.png')
+                if os.path.exists(png_path):
+                    return png_path
             else:
                 return local_img_path
 
-        except Exception as e:
-            if attempt < retries:
-                time.sleep(1)  # 重试间隔
+        headers = {"User-Agent":"Mozilla/5.0"}
+        response = requests.get(image_url, headers=headers, timeout=20)
+        response.raise_for_status()
+        with open(local_img_path,'wb') as f:
+            f.write(response.content)
+
+        if is_webp:
+            png_path = convert_webp_to_png(local_img_path)
+            if png_path:
+                new_png_path = os.path.join(convert_folder, os.path.basename(png_path))
+                os.rename(png_path, new_png_path)
+                return new_png_path
             else:
-                print(f"❌ 下载失败: {image_url[:60]}..., 错误: {e}")
-                return None
+                return local_img_path
+        else:
+            return local_img_path
+    except:
+        return None
 
 def auto_insert_images_to_excel(excel_path, sheet_name, st_container=None):
     wb = load_workbook(excel_path)
@@ -128,12 +111,11 @@ def auto_insert_images_to_excel(excel_path, sheet_name, st_container=None):
 
     for i, link_info in enumerate(image_links, 1):
         status_text.text(f"处理第 {i}/{total} 个图片: {link_info['cell']}，成功 {success_count} 张，失败 {fail_count} 张")
-        local_img_path = download_and_convert_image(link_info['url'], 'temp_images','temp_png', retries=3)
+        local_img_path = download_and_convert_image(link_info['url'], 'temp_images','temp_png')
         if not local_img_path:
             fail_count += 1
             progress_bar.progress(int(i/total*100))
             continue
-
         ws.row_dimensions[link_info['row']].height = 120
         ws.column_dimensions[link_info['column']].width = 25
         try:
